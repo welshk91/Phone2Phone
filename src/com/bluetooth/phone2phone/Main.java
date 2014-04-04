@@ -1,15 +1,28 @@
 package com.bluetooth.phone2phone;
 
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.util.Set;
+import java.util.UUID;
 
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothServerSocket;
+import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.Window;
@@ -22,59 +35,53 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class Main extends Activity{
-	// Return Intent extra
 	public static String EXTRA_DEVICE_ADDRESS = "device_address";
+	private static final String NAME = "Phone2Phone";
+	private static final UUID MY_UUID = UUID.fromString("dfcf8571-7c02-4ac6-8ddd-b31731c5fa18");
 
-	// Member fields
 	private BluetoothAdapter mBtAdapter;
 	private ArrayAdapter<String> mPairedDevicesArrayAdapter;
 	private ArrayAdapter<String> mNewDevicesArrayAdapter;
+
+	private AcceptThread mAcceptThread;
+	private ConnectThread mConnectThread;
+	private ConnectedThread mConnectedThread;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 
-		// Setup the window
 		requestWindowFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
 		setContentView(R.layout.main);
 
-		// Set result CANCELED incase the user backs out
-		setResult(Activity.RESULT_CANCELED);
-
-		// Initialize the button to perform device discovery
 		Button scanButton = (Button) findViewById(R.id.button_scan);
 		scanButton.setOnClickListener(new OnClickListener() {
 			public void onClick(View v) {
 				//mPairedDevicesArrayAdapter.clear();
 				mNewDevicesArrayAdapter.clear();
-				doDiscovery();
+				scan();
 			}
 		});
 
-		// Initialize array adapters. One for already paired devices and
-		// one for newly discovered devices
 		mPairedDevicesArrayAdapter = new ArrayAdapter<String>(this, R.layout.device);
-		mNewDevicesArrayAdapter = new ArrayAdapter<String>(this, R.layout.device);
-
-		// Find and set up the ListView for paired devices
 		ListView pairedListView = (ListView) findViewById(R.id.paired_devices);
 		pairedListView.setAdapter(mPairedDevicesArrayAdapter);
 		pairedListView.setOnItemClickListener(mDeviceClickListener);
 
-		// Find and set up the ListView for newly discovered devices
+		mNewDevicesArrayAdapter = new ArrayAdapter<String>(this, R.layout.device);
 		ListView newDevicesListView = (ListView) findViewById(R.id.new_devices);
 		newDevicesListView.setAdapter(mNewDevicesArrayAdapter);
 		newDevicesListView.setOnItemClickListener(mDeviceClickListener);
 
-		// Register for broadcasts when a device is discovered
+		//For when a device is discovered
 		IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
 		this.registerReceiver(mReceiver, filter);
 
-		// Register for broadcasts when discovery has finished
+		//For when discovery has finished
 		filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
 		this.registerReceiver(mReceiver, filter);
 
-		// Get the local Bluetooth adapter
+		//Bluetooth adapter
 		mBtAdapter = BluetoothAdapter.getDefaultAdapter();
 
 		if(mBtAdapter==null){
@@ -83,13 +90,12 @@ public class Main extends Activity{
 			return;
 		}
 
+		//Your device info
 		TextView info = (TextView)findViewById(R.id.text_info); 
 		info.setText("My Device: " +mBtAdapter.getName() +":"+ mBtAdapter.getAddress());
 
-		// Get a set of currently paired devices
+		//Get currently paired devices
 		Set<BluetoothDevice> pairedDevices = mBtAdapter.getBondedDevices();
-
-		// If there are paired devices, add each one to the ArrayAdapter
 		if (pairedDevices.size() > 0) {
 			findViewById(R.id.title_paired_devices).setVisibility(View.VISIBLE);
 			for (BluetoothDevice device : pairedDevices) {
@@ -104,32 +110,31 @@ public class Main extends Activity{
 	protected void onDestroy() {
 		super.onDestroy();
 
-		// Make sure we're not doing discovery anymore
 		if (mBtAdapter != null) {
 			mBtAdapter.cancelDiscovery();
 		}
-
-		// Unregister broadcast listeners
-		this.unregisterReceiver(mReceiver);
+		unregisterReceiver(mReceiver);
+		stopThreads();
 	}
 
-	/**
-	 * Start device discover with the BluetoothAdapter
-	 */
-	private void doDiscovery() {
-		// Indicate scanning in the title
+	@Override
+	protected void onResume() {
+		super.onResume();
+		startThreads();
+	}
+
+	//Scan for devices
+	private void scan() {
 		setProgressBarIndeterminateVisibility(true);
 		setTitle("Scanning...");
 
-		// Turn on sub-title for new devices
 		findViewById(R.id.title_new_devices).setVisibility(View.VISIBLE);
 
-		// If we're already discovering, stop it
+		//Cancel if we're already discovering
 		if (mBtAdapter.isDiscovering()) {
 			mBtAdapter.cancelDiscovery();
 		}
 
-		// Request discover from BluetoothAdapter
 		mBtAdapter.startDiscovery();
 	}
 
@@ -139,11 +144,11 @@ public class Main extends Activity{
 		discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300);
 		startActivity(discoverableIntent);		
 	}
-	
-	// The on-click listener for all devices in the ListViews
+
+	//ListView click listener
 	private OnItemClickListener mDeviceClickListener = new OnItemClickListener() {
 		public void onItemClick(AdapterView<?> av, View v, int arg2, long arg3) {
-			// Cancel discovery because it's costly and we're about to connect
+			//Stop scanning
 			mBtAdapter.cancelDiscovery();
 
 			// Get the device MAC address, which is the last 17 chars in the View
@@ -155,33 +160,290 @@ public class Main extends Activity{
 			intent.putExtra(EXTRA_DEVICE_ADDRESS, address);
 
 			Toast.makeText(Main.this, "Info="+info+" Address="+address, Toast.LENGTH_SHORT).show();
+
+			BluetoothDevice device = mBtAdapter.getRemoteDevice(address);
+
+			mConnectThread = new ConnectThread(device, new File ("/storage/sdcard1/Books/Ruby/JavaRuby.pdf"));
+			mConnectThread.start();
 		}
 	};
 
-	// The BroadcastReceiver that listens for discovered devices and
-	// changes the title when discovery is finished
+	//Listens for discovered devices & changes the title when discovery is finished
 	private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
 		@Override
 		public void onReceive(Context context, Intent intent) {
 			String action = intent.getAction();
 
-			// When discovery finds a device
+			//When discovery finds a device
 			if (BluetoothDevice.ACTION_FOUND.equals(action)) {
-				// Get the BluetoothDevice object from the Intent
+				//Get the BluetoothDevice object from the Intent
 				BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+
 				// If it's already paired, skip it, because it's been listed already
 				if (device.getBondState() != BluetoothDevice.BOND_BONDED) {
 					mNewDevicesArrayAdapter.add(device.getName() + "\n" + device.getAddress());
 				}
-				// When discovery is finished, change the Activity title
-			} else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
+			} 
+
+			else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
 				setProgressBarIndeterminateVisibility(false);
 				setTitle("Select a Device");
+
 				if (mNewDevicesArrayAdapter.getCount() == 0) {
 					mNewDevicesArrayAdapter.add("No Device Found");
 				}
 			}
 		}
 	};
+
+	public synchronized void stopThreads() {
+		if (mConnectThread != null) {
+			mConnectThread.cancel();
+			mConnectThread = null;
+		}
+
+		if (mConnectedThread != null) {
+			mConnectedThread.cancel();
+			mConnectedThread = null;
+		}
+
+		if (mAcceptThread != null) {
+			mAcceptThread.cancel();
+			mAcceptThread = null;
+		}
+	}
+
+	public synchronized void startThreads() {
+		// Cancel any thread attempting to make a connection
+		if (mConnectThread != null) {mConnectThread.cancel(); mConnectThread = null;}
+
+		// Cancel any thread currently running a connection
+		if (mConnectedThread != null) {mConnectedThread.cancel(); mConnectedThread = null;}
+
+		// Start the thread to listen on a BluetoothServerSocket
+		if (mAcceptThread == null) {
+			mAcceptThread = new AcceptThread();
+			mAcceptThread.start();
+		}
+	}
+
+	private class AcceptThread extends Thread {
+		private final BluetoothServerSocket mmServerSocket;
+
+		public AcceptThread() {
+			BluetoothServerSocket tmp = null;
+			try {
+				// MY_UUID is the app's UUID string, also used by the client code
+				tmp = mBtAdapter.listenUsingRfcommWithServiceRecord(NAME, MY_UUID);
+			} catch (IOException e) { }
+			mmServerSocket = tmp;
+		}
+
+		public void run() {
+			BluetoothSocket socket = null;
+			// Keep listening until exception occurs or a socket is returned
+			while (true) {
+				try {
+					socket = mmServerSocket.accept();
+				} catch (IOException e) {
+					break;
+				}
+				// If a connection was accepted
+				if (socket != null) {
+					//Do work to manage the connection (in a separate thread)
+					//manageConnectedSocket(socket);
+
+					mConnectedThread = new ConnectedThread(socket);
+					mConnectedThread.start();
+
+					try {
+						mmServerSocket.close();
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+					break;
+				}
+			}
+		}
+
+		public void cancel() {
+			try {
+				mmServerSocket.close();
+			} catch (IOException e) { }
+		}
+	}
+
+
+	private class ConnectThread extends Thread{
+		private final BluetoothSocket mmSocket;
+		private File file;
+
+		public ConnectThread(BluetoothDevice device, File f)
+		{
+			BluetoothSocket tmp = null;
+
+			//Get a BluetoothSocket to connect with the given BluetoothDevice
+			try
+			{
+				file = f;
+				tmp = device.createRfcommSocketToServiceRecord(MY_UUID);
+				Method m = device.getClass().getMethod("createRfcommSocket", new Class[] { int.class });
+				tmp = (BluetoothSocket) m.invoke(device, 1);
+			} catch (Exception e)
+			{
+				Log.e("Main-ConnectThread","Couldn't create a Bluetooth Socket!");
+				e.printStackTrace();
+			}
+
+			mmSocket = tmp;
+		}
+
+		public void run()
+		{
+			mBtAdapter.cancelDiscovery();
+
+			try{
+				// Connect the device through the socket. This will block
+				// until it succeeds or throws an exception
+				mmSocket.connect();
+				Log.d("Main-ConnectThread","Connection established");
+			} 
+			catch (IOException connectException){
+
+				try{
+					mmSocket.close();
+				} 
+				catch (IOException closeException){
+					Log.e("Main-ConnectThread","Failed to close connection");
+					closeException.printStackTrace();
+				}
+
+				Log.e("Main-ConnectThread","Failed to connect!");
+				return;
+			}
+
+			//manageConnectedSocket(socket);
+
+			mConnectedThread = new ConnectedThread(mmSocket,file);
+			mConnectedThread.start();
+
+			byte[] b = new byte[(int) file.length()];
+			try {
+				FileInputStream fileInputStream = new FileInputStream(file);
+				fileInputStream.read(b);
+				for (int i = 0; i < b.length; i++) {
+					System.out.print((char)b[i]);
+				}
+			} catch (FileNotFoundException e) {
+				System.out.println("File Not Found.");
+				e.printStackTrace();
+			}
+			catch (IOException e1) {
+				System.out.println("Error Reading The File.");
+				e1.printStackTrace();
+			}
+
+			mConnectedThread.write(b);
+		}
+
+		public void cancel()
+		{
+			try
+			{
+				mmSocket.close();
+			} catch (IOException e)
+			{
+				e.printStackTrace();
+			}
+		}
+	}
+
+	private class ConnectedThread extends Thread {
+		private final BluetoothSocket mmSocket;
+		private final InputStream mmInStream;
+		private final OutputStream mmOutStream;
+		private File file;
+
+		public ConnectedThread(BluetoothSocket socket, File f) {
+			file = f;
+			mmSocket = socket;
+			InputStream tmpIn = null;
+			OutputStream tmpOut = null;
+
+			// Get the input and output streams, using temp objects because
+			// member streams are final
+			try {
+				tmpIn = socket.getInputStream();
+				tmpOut = socket.getOutputStream();
+			} catch (IOException e) { }
+
+			mmInStream = tmpIn;
+			mmOutStream = tmpOut;
+		}
+
+		public ConnectedThread(BluetoothSocket socket) {
+			mmSocket = socket;
+			InputStream tmpIn = null;
+			OutputStream tmpOut = null;
+
+			// Get the input and output streams, using temp objects because
+			// member streams are final
+			try {
+				tmpIn = socket.getInputStream();
+				tmpOut = socket.getOutputStream();
+			} catch (IOException e) { }
+
+			mmInStream = tmpIn;
+			mmOutStream = tmpOut;
+		}
+
+		public void run() {
+			byte[] buffer = new byte[1024];  // buffer store for the stream
+			int bytes = 0; // bytes returned from read()
+
+			// Keep listening to the InputStream until an exception occurs
+			while (true) {
+				try {
+					//Read from the InputStream
+					bytes = mmInStream.read(buffer);
+					//Send the obtained bytes to the UI activity
+					//mHandler.obtainMessage(MESSAGE_READ, bytes, -1, buffer).sendToTarget();
+					
+				} 
+				catch (IOException e) {
+					break;
+				}
+			}
+			
+			FileOutputStream fos;
+			try {
+				fos = new FileOutputStream("");
+
+	            fos.write(bytes);
+	            fos.close();
+			} 
+			catch (FileNotFoundException e) {
+				e.printStackTrace();
+			} 
+			catch (IOException e) {
+				e.printStackTrace();
+			}			
+		}
+
+		/* Call this from the main activity to send data to the remote device */
+		public void write(byte[] bytes) {
+			try {
+				mmOutStream.write(bytes);
+			} catch (IOException e) { }
+		}
+
+		/* Call this from the main activity to shutdown the connection */
+		public void cancel() {
+			try {
+				mmSocket.close();
+			} catch (IOException e) { }
+		}
+	}
 
 }// end Main
