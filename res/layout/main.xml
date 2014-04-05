@@ -45,16 +45,24 @@
             android:id="@+id/button_scan"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight=".5"
+            android:layout_weight=".3"
             android:text="Scan" />
 
         <Button
             android:id="@+id/button_discoverable"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight=".5"
+            android:layout_weight=".3"
             android:onClick="makeDiscoverable"
             android:text="Make Discoverable" />
+
+        <Button
+            android:id="@+id/button_send"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight=".3"
+            android:onClick="send"
+            android:text="Send" />
     </LinearLayout>
 
     <TextView
