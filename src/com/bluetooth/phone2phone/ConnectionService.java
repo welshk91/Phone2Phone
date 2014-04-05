@@ -3,7 +3,6 @@ package com.bluetooth.phone2phone;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.Arrays;
 import java.util.UUID;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -211,14 +210,18 @@ public class ConnectionService  {
 	 * Indicate that the connection attempt failed and notify the UI Activity.
 	 */
 	private void connectionFailed() {
-		setState(STATE_LISTEN);
-
+		setState(STATE_LISTEN);		
+		
 		//Send a failure message back to the Activity
 		Message msg = mHandler.obtainMessage(Main.MESSAGE_TOAST);
 		Bundle bundle = new Bundle();
 		bundle.putString(Main.TOAST, "Unable to connect device");
 		msg.setData(bundle);
 		mHandler.sendMessage(msg);
+		
+		//Reset address of last device
+		msg = mHandler.obtainMessage(Main.MESSAGE_RESET_DEVICE);
+		mHandler.sendMessage(msg);		
 	}
 
 	/**
@@ -306,7 +309,6 @@ public class ConnectionService  {
 			}
 		}
 	}
-
 
 	/**
 	 * This thread runs while attempting to make an outgoing connection
@@ -410,7 +412,7 @@ public class ConnectionService  {
 		public void run() {
 
 			Log.i(TAG, "BEGIN mConnectedThread");
-			byte[] buffer = new byte[1024];
+			byte[] buffer = new byte[Main.BUFFER_SIZE];
 			int bytes;
 
 			// Keep listening to the InputStream while connected
