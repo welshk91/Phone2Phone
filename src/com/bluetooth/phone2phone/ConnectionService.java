@@ -253,7 +253,8 @@ public class ConnectionService  {
 			// Create a new listening server socket
 			try {
 				tmp = mAdapter.listenUsingRfcommWithServiceRecord(NAME, MY_UUID);
-			} catch (IOException e) {
+			} 
+			catch (IOException e) {
 				Log.e(TAG, "listen() failed", e);
 			}
 			mmServerSocket = tmp;
@@ -270,7 +271,8 @@ public class ConnectionService  {
 					// This is a blocking call and will only return on a
 					// successful connection or an exception
 					socket = mmServerSocket.accept();
-				} catch (IOException e) {
+				} 
+				catch (IOException e) {
 					Log.e(TAG, "accept() failed", e);
 					break;
 				}
@@ -289,7 +291,8 @@ public class ConnectionService  {
 							// Either not ready or already connected. Terminate new socket.
 							try {
 								socket.close();
-							} catch (IOException e) {
+							} 
+							catch (IOException e) {
 								Log.e(TAG, "Could not close unwanted socket", e);
 							}
 							break;
@@ -304,7 +307,8 @@ public class ConnectionService  {
 			if (debug) Log.d(TAG, "cancel " + this);
 			try {
 				mmServerSocket.close();
-			} catch (IOException e) {
+			} 
+			catch (IOException e) {
 				Log.e(TAG, "close() of server failed", e);
 			}
 		}
@@ -438,8 +442,8 @@ public class ConnectionService  {
 
 					count = count+1;
 										
-					Log.e("ConnectionService-ConnectedThread","read buffer="+buffer);
-					//Log.e("ConnectionService-ConnectedThread","is read buffer=file? "+ Arrays.equals(buffer, Main.file));
+					Log.d("ConnectionService-ConnectedThread","read buffer="+buffer);
+					//Log.d("ConnectionService-ConnectedThread","is read buffer=file? "+ Arrays.equals(buffer, Main.file));
 				} 
 				catch (IOException e) {
 					Log.e(TAG, "disconnected", e);
@@ -477,8 +481,8 @@ public class ConnectionService  {
 
 				count = count+1;
 				
-				Log.e("ConnectionService-ConnectedThread","write buffer="+buffer);
-				//Log.e("ConnectionService-ConnectedThread","is write buffer=file? "+ Arrays.equals(buffer, Main.file));
+				Log.d("ConnectionService-ConnectedThread","write buffer="+buffer);
+				//Log.d("ConnectionService-ConnectedThread","is write buffer=file? "+ Arrays.equals(buffer, Main.file));
 			} catch (IOException e) {
 				Log.e(TAG, "Exception during write", e);
 			}

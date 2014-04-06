@@ -10,6 +10,7 @@ import java.io.UnsupportedEncodingException;
 import java.util.Set;
 
 import android.app.Activity;
+import android.app.ProgressDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
@@ -46,7 +47,12 @@ public class Main extends Activity{
 
 	//Max File size = 1mb
 	public static final int BUFFER_SIZE = 1024^2;
-	
+
+	//ProgressBar
+	int progressBarStatus = 0;
+	long fileSize = 0;
+	private Handler progressBarbHandler = new Handler();
+
 	private BluetoothAdapter mBtAdapter;
 	private ArrayAdapter<String> mPairedDevicesArrayAdapter;
 	private ArrayAdapter<String> mNewDevicesArrayAdapter;
@@ -119,7 +125,12 @@ public class Main extends Activity{
 			mConnectionService.stop();
 		}
 
-		unregisterReceiver(mReceiver);
+		try{
+			unregisterReceiver(mReceiver);
+		}
+		catch(Exception e){
+			Log.d("Main-onDestroy","Tried unregistering receiver that wasn't registered");
+		}
 	}
 
 	@Override
@@ -181,12 +192,12 @@ public class Main extends Activity{
 		info.setText("My Device: " +mBtAdapter.getName() +":"+ mBtAdapter.getAddress());
 
 		updatePairedDevices();
-		
+
 		//Initialize the BluetoothChatService to perform bluetooth connections
 		mConnectionService = new ConnectionService(this,mHandler);
 	}
 
-	
+
 	public void updatePairedDevices(){
 		mPairedDevicesArrayAdapter.clear();
 		//Get currently paired devices
@@ -200,14 +211,14 @@ public class Main extends Activity{
 			mPairedDevicesArrayAdapter.add("None Paired");
 		}		
 	}
-	
+
 	//Set up device so it can be discovered by other phones
 	public void makeDiscoverable(View v){
 		Intent discoverableIntent = new	Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
 		discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300);
 		startActivity(discoverableIntent);		
 	}
-	
+
 	//Scan for devices
 	private void scan() {
 		setProgressBarIndeterminateVisibility(true);
@@ -222,7 +233,7 @@ public class Main extends Activity{
 
 		mBtAdapter.startDiscovery();
 	}
-	
+
 	// The Handler that gets information back from the BluetoothChatService
 	private final Handler mHandler = new Handler() {
 		@Override
@@ -237,6 +248,7 @@ public class Main extends Activity{
 					setTitle("Connecting...");
 					break;
 				case ConnectionService.STATE_LISTEN:
+					setTitle("Listening...");
 				case ConnectionService.STATE_NONE:
 					setTitle("Not Connected");
 					break;
@@ -244,11 +256,11 @@ public class Main extends Activity{
 				break;
 
 			case MESSAGE_WRITE_FILENAME:
-				Toast.makeText(getApplicationContext(), "Sent filename "+ linkFileName, Toast.LENGTH_LONG).show();
+				//Toast.makeText(getApplicationContext(), "Sent filename "+ linkFileName, Toast.LENGTH_SHORT).show();
 				break;
 
 			case MESSAGE_WRITE_FILE:
-				Toast.makeText(getApplicationContext(), "Sent file "+ linkFilePath, Toast.LENGTH_LONG).show();
+				//Toast.makeText(getApplicationContext(), "Sent file "+ linkFilePath, Toast.LENGTH_SHORT).show();
 				break;
 
 			case MESSAGE_READ_FILE:
@@ -309,7 +321,7 @@ public class Main extends Activity{
 		intent.setType("*/*");
 		startActivityForResult(intent,PICKFILE_RESULT_CODE);
 	}
-	
+
 	//Method finds path name, both from gallery or file manager
 	public String getPath(Uri uri) {
 		String[] projection = { MediaStore.Images.Media.DATA };
@@ -329,12 +341,13 @@ public class Main extends Activity{
 
 	public static byte[] convertFileToByteArray(File f){
 		byte[] byteArray = null;
+		InputStream inputStream = null;
 
 		try {
-			InputStream inputStream = new FileInputStream(f);
+			inputStream = new FileInputStream(f);
 			ByteArrayOutputStream bos = new ByteArrayOutputStream();
 			byte[] b = new byte[BUFFER_SIZE];
-			int bytesRead =0;
+			int bytesRead = 0;
 
 			while ((bytesRead = inputStream.read(b)) != -1)
 			{
@@ -343,11 +356,19 @@ public class Main extends Activity{
 
 			byteArray = bos.toByteArray();
 			//inputStream.close();
-			Log.e("Main-convertFileToByteArray","Converted file!");
+			Log.d("Main-convertFileToByteArray","Converted file!");
 		}
 		catch (IOException e){
 			Log.e("Main-convertFileToByteArray","Error converting file\n e="+e);
 			e.printStackTrace();
+		}
+		finally{
+			try {
+				inputStream.close();
+			} catch (IOException e) {
+				Log.e("Main-convertFileToByteArray","Error closing inputStream\n e="+e);
+				e.printStackTrace();
+			}
 		}
 
 		return byteArray;
@@ -449,16 +470,33 @@ public class Main extends Activity{
 			break;
 
 		case PICKFILE_RESULT_CODE:
-			if(resultCode==RESULT_OK){
+			if(resultCode==RESULT_OK){								
 				linkFilePath = null;
 				linkFileName = null;
 				linkFilePath = getPath(data.getData());
-				File file = new File (linkFilePath);
+				final File file = new File (linkFilePath);
 				linkFileName = file.getName().trim();
-				
+
 				if(linkFilePath!=null && linkFilePath.length()>0){
-					mConnectionService.write(linkFileName.getBytes());
-					mConnectionService.write(convertFileToByteArray(file));
+
+					final ProgressDialog myPd_ring = ProgressDialog.show(Main.this, "Sending File", "Sending File " + linkFileName, true);
+					myPd_ring.setCancelable(false);
+					new Thread(new Runnable() {  
+						@Override
+						public void run() {
+							try
+							{
+								mConnectionService.write(linkFileName.getBytes());
+								mConnectionService.write(convertFileToByteArray(file));
+							}
+							catch(Exception e){
+								Log.e("Main-onActivityResult","Error sending file \n e="+e);
+								Toast.makeText(Main.this, "Error sending file\nError="+e, Toast.LENGTH_LONG).show();
+							}
+							myPd_ring.dismiss();
+						}
+					}).start();
+
 				}
 
 			}
